@@ -4,16 +4,16 @@ from stravalib.client import Client
 
 
 @task
-def get_or_update_token():
+def authenticate_strava_client():
 
     client = Client()
 
     # can we use prefect blocks to help manage secrets storage instead of ENV variables?
     if not os.environ.get("STRAVA_ACCESS_TOKEN"):
-        authorize_url = client.authorization_url(client_id=os.environ.get("CLIENT_ID"), redirect_uri='http://localhost:8282/authorized', scope="activity:read_all")
-        print(f"Authorize here and return the authorization code {authorize_url}")
-        authorization_code = input('Paste authorization code here')
-        token_response = client.exchange_code_for_token(client_id=os.environ.get("CLIENT_ID"), client_secret=os.environ.get("CLIENT_SECRET", code=authorization_code))
+        authorize_url = client.authorization_url(client_id=os.environ.get("STRAVA_CLIENT_ID"), redirect_uri='http://localhost/authorized', scope="activity:read_all")
+        print(f"\nAuthorize here and return the authorization code:\n {authorize_url}\n")
+        authorization_code = input('Paste authorization code here: ')
+        token_response = client.exchange_code_for_token(client_id=os.environ.get("STRAVA_CLIENT_ID"), client_secret=os.environ.get("STRAVA_CLIENT_SECRET"), code=authorization_code)
         access_token = token_response['access_token']
         refresh_token = token_response['refresh_token']
         expires_at = token_response['expires_at']
@@ -26,13 +26,11 @@ def get_or_update_token():
     client.refresh_token = refresh_token
     client.token_expires_at = expires_at
 
-    client.refresh_access_token
-
     athlete = client.get_athlete()
     print("For {id}, I now have an access token {token}".format(id=athlete.id, token=access_token))
 
 
-    return token
+    return client
 
 @task
 def get_list_of_activities():
@@ -46,7 +44,7 @@ def fetch_activity_file(id):
 
 @flow()
 def transfer_strava_data():
-    token = get_or_update_token()
+    client = authenticate_strava_client()
     activities = get_list_of_activities()
     for id in activities:
         print(id)
