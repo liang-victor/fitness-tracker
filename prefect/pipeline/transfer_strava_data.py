@@ -1,36 +1,49 @@
 from prefect import flow, task
 import os
 from stravalib.client import Client
+from prefect.blocks.system import Secret, DateTime
+import pendulum
 
+STRAVA_ACCESS_TOKEN = "strava-access-token"
+STRAVA_REFRESH_TOKEN = "strava-refresh-token"
+STRAVA_TOKEN_EXPIRY = "strava-token-expiry"
 
 @task
 def authenticate_strava_client():
 
     client = Client()
 
-    # can we use prefect blocks to help manage secrets storage instead of ENV variables?
-    if not os.environ.get("STRAVA_ACCESS_TOKEN"):
+    try: 
+        client.access_token = Secret.load(STRAVA_ACCESS_TOKEN).get()
+        client.refresh_token = Secret.load(STRAVA_REFRESH_TOKEN).get()
+        client.token_expires_at = DateTime.load(STRAVA_TOKEN_EXPIRY).value.timestamp()
+    except ValueError:
+        manual_authorization(client)
+
+    if pendulum.now().timestamp() > client.token_expires_at:
+        client.refresh_access_token(client_id=os.environ.get("STRAVA_CLIENT_ID"), 
+                                    client_secret=os.environ.get("STRAVA_CLIENT_SECRET"),
+                                    refresh_token=client.refresh_token)
+
+    return client
+
+def manual_authorization(client):
         authorize_url = client.authorization_url(client_id=os.environ.get("STRAVA_CLIENT_ID"), redirect_uri='http://localhost/authorized', scope="activity:read_all")
         print(f"\nAuthorize here and return the authorization code:\n {authorize_url}\n")
         authorization_code = input('Paste authorization code here: ')
-        token_response = client.exchange_code_for_token(client_id=os.environ.get("STRAVA_CLIENT_ID"), client_secret=os.environ.get("STRAVA_CLIENT_SECRET"), code=authorization_code)
-        access_token = token_response['access_token']
-        refresh_token = token_response['refresh_token']
-        expires_at = token_response['expires_at']
-    else:
-        access_token = os.environ.get("STRAVA_ACCESS_TOKEN")
-        refresh_token = os.environ.get("STRAVA_REFRESH_TOKEN")
-        expires_at = os.environ.get("STRAVA_TOKEN_EXPIRY")
+        token_response = client.exchange_code_for_token(client_id=os.environ.get("STRAVA_CLIENT_ID"), 
+                                                        client_secret=os.environ.get("STRAVA_CLIENT_SECRET"), 
+                                                        code=authorization_code)
+        store_token_response_in_blocks(token_response)
 
-    client.access_token = access_token
-    client.refresh_token = refresh_token
-    client.token_expires_at = expires_at
+def store_token_response_in_blocks(token_response):
+        Secret(value=token_response['access_token']).save(STRAVA_ACCESS_TOKEN, overwrite=True)
+        Secret(value=token_response['refresh_token']).save(STRAVA_REFRESH_TOKEN, overwrite=True)
+        expiry = pendulum.from_timestamp(token_response['expires_at']) 
 
-    athlete = client.get_athlete()
-    print("For {id}, I now have an access token {token}".format(id=athlete.id, token=access_token))
-
-
-    return client
+        DateTime(value=expiry).save(STRAVA_TOKEN_EXPIRY, overwrite=True)
+        # String(value=token_response['expires_at']).save(STRAVA_TOKEN_EXPIRY)
+        print(token_response['expires_at'])
 
 @task
 def get_list_of_activities():
