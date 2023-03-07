@@ -21,10 +21,7 @@ def authenticate_strava_client():
         manual_authorization(client)
 
     if pendulum.now().timestamp() > client.token_expires_at:
-        client.refresh_access_token(client_id=os.environ.get("STRAVA_CLIENT_ID"), 
-                                    client_secret=os.environ.get("STRAVA_CLIENT_SECRET"),
-                                    refresh_token=client.refresh_token)
-
+        client = refresh_access_token(client)
     return client
 
 def manual_authorization(client):
@@ -36,14 +33,20 @@ def manual_authorization(client):
                                                         code=authorization_code)
         store_token_response_in_blocks(token_response)
 
+def refresh_access_token(client):
+    token_response = client.refresh_access_token(client_id=os.environ.get("STRAVA_CLIENT_ID"), 
+                                    client_secret=os.environ.get("STRAVA_CLIENT_SECRET"),
+                                    refresh_token=client.refresh_token)
+    store_token_response_in_blocks(token_response)
+    client.access_token = token_response["access_token"]
+    client.refresh_token = token_response["refresh_token"]
+    client.expiry = token_response["expires_at"]
+    return client
+
 def store_token_response_in_blocks(token_response):
         Secret(value=token_response['access_token']).save(STRAVA_ACCESS_TOKEN, overwrite=True)
         Secret(value=token_response['refresh_token']).save(STRAVA_REFRESH_TOKEN, overwrite=True)
-        expiry = pendulum.from_timestamp(token_response['expires_at']) 
-
-        DateTime(value=expiry).save(STRAVA_TOKEN_EXPIRY, overwrite=True)
-        # String(value=token_response['expires_at']).save(STRAVA_TOKEN_EXPIRY)
-        print(token_response['expires_at'])
+        DateTime(value=pendulum.from_timestamp(token_response['expires_at'])).save(STRAVA_TOKEN_EXPIRY, overwrite=True)
 
 @task
 def get_list_of_activities():
