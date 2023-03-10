@@ -2,3 +2,5 @@ lxml
 prefect
 prefect-gcp[cloud_storage]
 stravalib
+jupyter
+pandas
